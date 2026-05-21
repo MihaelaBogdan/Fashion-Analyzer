@@ -40,7 +40,8 @@ def render_tab4(DEVICE, clip_model, clip_processor, INDEX_DIR, EMB_DIR):
     feature_sel = st.radio("Alege Demonstrația:", 
         ["1. Matematică Semantică (Vector Arithmetic)", 
          "2. Proiecție 3D (PCA Latent Space)", 
-         "3. Hibridizare (Latent Interpolation)"], horizontal=True)
+         "3. Hibridizare (Latent Interpolation)",
+         "4. Coerența Garderobei (Wardrobe Cohesion)"], horizontal=True)
          
     st.markdown("---")
     
@@ -204,3 +205,149 @@ def render_tab4(DEVICE, clip_model, clip_processor, INDEX_DIR, EMB_DIR):
                                 st.image(Image.open(sim_path), use_container_width=True)
                                 st.markdown(f"<div style='margin-top:5px; font-weight:bold; color:#8b5cf6;'>Asemănare: {score:.3f}</div>", unsafe_allow_html=True)
                                 st.markdown("</div>", unsafe_allow_html=True)
+                                
+    elif "Coerența" in feature_sel:
+        st.markdown("### Wardrobe Coherence & Style Centroid Builder")
+        st.markdown("<p style='color: #cbd5e1;'>Încarcă poze cu hainele preferate din propria garderobă. AI-ul le va transforma în vectori de embeddings, va calcula gradul de coerență stilistică folosind o matrice de corelație cosinus, va deduce stilul tău predominant și îți va recomanda piese din magazin care se potrivesc ideal cu ceea ce deții deja!</p>", unsafe_allow_html=True)
+        
+        wardrobe_files = st.file_uploader("Încarcă poze cu hainele din garderoba ta (Selectează multiple)...", type=["jpg", "jpeg", "png"], accept_multiple_files=True, key="wardrobe_upload")
+        
+        if wardrobe_files and len(wardrobe_files) >= 2:
+            st.markdown(f"**Garderoba ta conține {len(wardrobe_files)} piese selectate:**")
+            
+            # Afișare previzualizare piese încărcate
+            grid_cols = st.columns(min(6, len(wardrobe_files)))
+            images = []
+            for i, f in enumerate(wardrobe_files):
+                img = Image.open(f).convert("RGB")
+                images.append(img)
+                with grid_cols[i % 6]:
+                    st.image(img, use_container_width=True, caption=f"Piesa {i+1}")
+            
+            if st.button("Analizează Coerența Stilistică", use_container_width=True):
+                with st.spinner("Se calculează semnăturile matematice (Embeddings)..."):
+                    embs = []
+                    with torch.no_grad():
+                        for img in images:
+                            inputs = clip_processor(images=img, return_tensors="pt").to(DEVICE)
+                            emb = clip_model.get_image_features(**inputs).pooler_output
+                            emb = emb / emb.norm(dim=-1, keepdim=True)
+                            embs.append(emb.squeeze(0).cpu().numpy().astype("float32"))
+                    
+                    embs = np.array(embs)
+                    # Produs scalar pentru distanță Cosinus (vectori L2 normalizați)
+                    sim_matrix = np.dot(embs, embs.T)
+                    sim_matrix = np.clip(sim_matrix, 0, 1)
+                    
+                    # Media elementelor de pe diagonala superioară
+                    n = len(images)
+                    triu_indices = np.triu_indices(n, k=1)
+                    avg_sim = np.mean(sim_matrix[triu_indices]) if n > 1 else 1.0
+                    coherence_pct = int(avg_sim * 100)
+                    
+                    st.markdown("---")
+                    
+                    res_c1, res_c2 = st.columns([2, 3])
+                    
+                    with res_c1:
+                        st.markdown("<h4 style='color: #f8fafc;'>Raport de Coerență Stilistică</h4>", unsafe_allow_html=True)
+                        
+                        if coherence_pct >= 75:
+                            tier = "Garderobă Extrem de Coezivă "
+                            color = "#10b981"
+                            desc = "Piesele tale vestimentare se îmbină perfect, având o unitate estetică puternică. Ești foarte consecvent în stilul tău!"
+                        elif coherence_pct >= 55:
+                            tier = "Garderobă Versatilă / Mixtă "
+                            color = "#3b82f6"
+                            desc = "Ai un mix excelent de stiluri care pot fi combinate cu ușurință. Garderoba ta este atât practică, cât și variată!"
+                        else:
+                            tier = "Garderobă Eclectică / Diversă "
+                            color = "#ec4899"
+                            desc = "Piesele tale aparțin unor stiluri extrem de diverse. Acest lucru îți oferă unicitate, dar poate îngreuna asortarea rapidă."
+                            
+                        st.markdown(f"""
+                        <div style='background: rgba(255,255,255,0.05); padding: 20px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); text-align: center;'>
+                            <div style='font-size: 16px; color: #cbd5e1;'>Scor de Coerență</div>
+                            <div style='font-size: 48px; font-weight: 900; color: {color}; margin: 10px 0;'>{coherence_pct}%</div>
+                            <div style='font-size: 16px; font-weight: bold; color: #f8fafc;'>{tier}</div>
+                            <p style='font-size: 13px; color: #94a3b8; margin-top: 10px; line-height: 1.4;'>{desc}</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                        # Calculăm vectorul mediu (Centroidul Garderobei)
+                        centroid_emb = np.mean(embs, axis=0)
+                        centroid_emb = centroid_emb / np.linalg.norm(centroid_emb)
+                        
+                        # Proiectăm pe direcții stilistice semantice
+                        semantic_concepts = ["Streetwear", "Business Casual", "Vintage", "Bohemian", "Sport", "Elegant Evening", "Minimalist"]
+                        with torch.no_grad():
+                            concept_inputs = clip_processor(text=semantic_concepts, return_tensors="pt", padding=True).to(DEVICE)
+                            concept_embs = clip_model.get_text_features(**concept_inputs).pooler_output
+                            concept_embs = concept_embs / concept_embs.norm(dim=-1, keepdim=True)
+                            concept_embs = concept_embs.cpu().numpy().astype("float32")
+                        
+                        style_similarities = np.dot(concept_embs, centroid_emb)
+                        dominant_concept = semantic_concepts[np.argmax(style_similarities)]
+                        
+                        st.markdown(f"<div style='margin-top: 15px; text-align: center; font-size: 14px; color: #f8fafc;'>Direcția stilistică dominantă: <span style='color: #8b5cf6; font-weight: bold;'>{dominant_concept}</span></div>", unsafe_allow_html=True)
+                        
+                    with res_c2:
+                        st.markdown("<h4 style='color: #f8fafc;'>Matricea de Corelație Estetică (Cosinus Similarity)</h4>", unsafe_allow_html=True)
+                        import plotly.express as px
+                        labels = [f"Piesa {i+1}" for i in range(n)]
+                        fig_heat = px.imshow(
+                            sim_matrix,
+                            labels=dict(x="Piese din Garderobă", y="Piese din Garderobă", color="Similaritate"),
+                            x=labels, y=labels,
+                            color_continuous_scale="Sunsetdark"
+                        )
+                        fig_heat.update_layout(
+                            paper_bgcolor="rgba(0,0,0,0)",
+                            plot_bgcolor="rgba(0,0,0,0)",
+                            margin=dict(t=10, b=10, l=10, r=10),
+                            height=250,
+                            font=dict(color="#cbd5e1")
+                        )
+                        st.plotly_chart(fig_heat, use_container_width=True)
+                        
+                    # Recomandări FAISS folosind Centroidul Garderobei
+                    st.markdown("---")
+                    st.markdown("<h3 style='color: #f8fafc; text-align: center;'>Piese Recomandate pentru Completarea Garderobei</h3>", unsafe_allow_html=True)
+                    st.markdown("<p style='text-align: center; color: #94a3b8; font-size: 14px;'>Folosind Centroidul Garderobei tale, am interogat catalogul local pentru a găsi piesele care se armonizează cel mai bine cu ceea ce deții deja.</p>", unsafe_allow_html=True)
+                    
+                    # Recomandări FAISS folosind Centroidul Garderobei (deduplicate)
+                    scores, indices = faiss_index.search(centroid_emb.reshape(1, -1), 30)
+                    
+                    unique_recs = []
+                    seen_paths = set()
+                    for score, idx in zip(scores[0], indices[0]):
+                        if idx == -1: continue
+                        meta = metadata[idx]
+                        sim_path = meta["crop_path"]
+                        if Path(sim_path).exists():
+                            if sim_path in seen_paths:
+                                continue
+                            seen_paths.add(sim_path)
+                            unique_recs.append((score, meta))
+                            if len(unique_recs) >= 4:
+                                break
+                    
+                    rec_cols = st.columns(len(unique_recs))
+                    for i, (score, meta) in enumerate(unique_recs):
+                        sim_path = meta["crop_path"]
+                        with rec_cols[i]:
+                            st.markdown(f"<div class='dark-card' style='padding:10px; text-align:center;'>", unsafe_allow_html=True)
+                            st.image(Image.open(sim_path), use_container_width=True)
+                            st.markdown(f"<div style='margin-top:5px; font-weight:bold; color:#ec4899;'>{meta['category'].upper()}</div>", unsafe_allow_html=True)
+                            
+                            match_pct = int((score + 1) / 2 * 100) if score <= 1.0 else int((1 / (1 + score)) * 100)
+                            st.markdown(f"""
+                            <div style='background: rgba(255,255,255,0.1); border-radius: 6px; height: 6px; margin-top: 8px; overflow: hidden;'>
+                                <div style='background: linear-gradient(90deg, #ec4899, #8b5cf6); width: {match_pct}%; height: 100%; border-radius: 6px;'></div>
+                            </div>
+                            <div style='text-align: right; font-size: 11px; color: #cbd5e1; margin-top: 4px;'>{match_pct}% Compatibilitate</div>
+                            """, unsafe_allow_html=True)
+                            st.markdown("</div>", unsafe_allow_html=True)
+                                
+        elif wardrobe_files:
+            st.warning("Vă rugăm să selectați cel puțin 2 piese vestimentare pentru a putea calcula corelațiile și gradul de coerență stilistică.")

@@ -5,7 +5,7 @@ with open("app.py", "r") as f:
 
 content = content.replace(
     'tab1, tab2 = st.tabs(["Prediction and Inference", "Fine-Tuning Model"])',
-    'tab1, tab2, tab3 = st.tabs(["Prediction and Inference", "Fine-Tuning Model", "✨ AI Outfit Analyzer"])'
+    'tab1, tab2, tab3 = st.tabs(["Prediction and Inference", "Fine-Tuning Model", "AI Outfit Analyzer"])'
 )
 
 tab3_code = """
@@ -65,7 +65,7 @@ with tab3:
             index_path = INDEX_DIR / "fashion_clip.index"
             meta_path = EMB_DIR / "metadata.json"
             
-            st.success(f"### ✨ {best_style.upper()} DETECTED ✨")
+            st.success(f"### {best_style.upper()} DETECTED ")
             
             detected_str = ", ".join(detected_clothes).title() if detected_clothes else "General Apparel"
             st.markdown(f"**Obiecte Detectate în Outfit:** {detected_str}")
@@ -78,7 +78,7 @@ with tab3:
                 
                 scores, indices = faiss_index.search(img_emb.reshape(1, -1), 5)
                 st.markdown("---")
-                st.markdown("### 🛍️ Recomandări Similare din Magazin:")
+                st.markdown("### Recomandări Similare din Magazin:")
                 
                 sim_cols = st.columns(5)
                 for i, (score, idx) in enumerate(zip(scores[0], indices[0])):
