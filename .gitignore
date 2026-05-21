@@ -1,0 +1,15 @@
+venv/
+__pycache__/
+*.npy
+*.index
+*.pt
+*.pth
+*.torchscript
+*.zip
+fashion_crops/
+fashion_emb/
+fashion_index/
+fashion_ckpt/
+fashion200k/
+app_archive.py
+hf_files.txt
