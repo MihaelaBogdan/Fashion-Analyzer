@@ -118,7 +118,6 @@ def render_tab4(DEVICE, clip_model, clip_processor, INDEX_DIR, EMB_DIR):
 
     elif "Hibridizare" in feature_sel:
         st.markdown("###  Latent Space Interpolation (Găsirea Hibridului)")
-        st.markdown("<p style='color: #cbd5e1;'>Ce se află *exact la jumătatea* distanței dintre două haine complet diferite? Acest instrument extrage mediul matematic dintre 2 imagini și găsește cea mai apropiată formă fizică din magazin!</p>", unsafe_allow_html=True)
         
         c1, c2 = st.columns(2)
         with c1:
@@ -135,7 +134,7 @@ def render_tab4(DEVICE, clip_model, clip_processor, INDEX_DIR, EMB_DIR):
             with sc2: st.markdown("<h1 style='text-align:center; color:#ec4899; margin-top:50%;'>+</h1>", unsafe_allow_html=True)
             with sc3: st.image(im2, caption="Element B", use_container_width=True)
             
-            if st.button(" Generează Hibridul (A + B / 2)", use_container_width=True):
+            if st.button("Generează Hibridul", use_container_width=True):
                 with st.spinner("Interpolăm spațiul..."):
                     with torch.no_grad():
                         i1 = clip_processor(images=im1, return_tensors="pt").to(DEVICE)
