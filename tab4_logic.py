@@ -37,7 +37,7 @@ def render_tab4(DEVICE, clip_model, clip_processor, INDEX_DIR, EMB_DIR):
     st.markdown("<h2 style='text-align: center; color: #ec4899;'>Analytics</h2>", unsafe_allow_html=True)
     
     feature_sel = st.radio("Alege Demonstrația:", 
-        ["1. Matematică Semantică (Vector Arithmetic)", 
+        ["Vector Aritmetic", 
          "2. Hibridizare (Latent Interpolation)",
          "3. Coerența Garderobei (Wardrobe Cohesion)"], horizontal=True)
          
@@ -54,8 +54,8 @@ def render_tab4(DEVICE, clip_model, clip_processor, INDEX_DIR, EMB_DIR):
     with open(meta_path) as f:
         metadata = json.load(f)
         
-    if "Matematică" in feature_sel:
-        st.markdown("###  Vector Arithmetic (Image + Text - Text)")
+    if "Vector Aritmetic" in feature_sel:
+        st.markdown("### Vector Aritmetic")
         st.markdown("<p style='color: #cbd5e1;'>Demonstrăm că 'Sensul' (Semantica) este o direcție pur matematică în spațiul latent. Alege o poză și aplică operații algebrice cu anumite cuvinte!</p>", unsafe_allow_html=True)
         
         col1, col2 = st.columns([1, 2])
