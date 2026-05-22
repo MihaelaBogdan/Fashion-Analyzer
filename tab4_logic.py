@@ -34,7 +34,7 @@ def get_pca_projection(emb_dir):
     return proj_3d, sampled_meta
 
 def render_tab4(DEVICE, clip_model, clip_processor, INDEX_DIR, EMB_DIR):
-    st.markdown("<h2 style='text-align: center; color: #ec4899;'>Statistici</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 style='text-align: center; color: #ec4899;'>Matematică & Stil</h2>", unsafe_allow_html=True)
     
     feature_sel = st.radio("Alege Demonstrația:", 
         ["Matematică Semantică", 

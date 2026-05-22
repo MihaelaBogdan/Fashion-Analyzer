@@ -293,7 +293,7 @@ class FashionTripletDataset(Dataset):
 st.sidebar.title("Device Status")
 st.sidebar.info(f"**Current Device:** `{DEVICE}`")
 
-tab1, tab3, tab4 = st.tabs(["Căutare Semantică", "AI Outfit Analyzer", "Statistici"])
+tab1, tab3, tab4 = st.tabs(["Căutare Semantică", "AI Outfit Analyzer", "Matematică & Stil"])
 
 with tab1:
     st.markdown("""
