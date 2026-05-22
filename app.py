@@ -402,20 +402,9 @@ with tab1:
     if not all_categories:
         all_categories = ["Kurtas", "Kurtis", "Tshirts", "Tops", "Dresses", "Jeans", "Trousers", "Shorts", "Skirts"]
 
-    st.markdown("<div class='dark-card' style='margin-top: 15px; margin-bottom: 15px;'>", unsafe_allow_html=True)
-    with st.expander("Filtre de Căutare Avansată & Praguri"):
-        col_f1, col_f2 = st.columns(2)
-        with col_f1:
-            num_results = st.slider("Număr de recomandări afișate:", min_value=3, max_value=12, value=5)
-        with col_f2:
-            min_similarity = st.slider("Prag similaritate minimă (%):", min_value=30, max_value=100, value=40)
-        
-        category_filter = st.multiselect(
-            "Filtrează exclusiv pe categoriile selectate (lasă gol pentru TOATE):",
-            options=all_categories,
-            default=[]
-        )
-    st.markdown("</div>", unsafe_allow_html=True)
+    num_results = 5
+    min_similarity = 40
+    category_filter = []
 
     
     uploaded_file = None
