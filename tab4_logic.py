@@ -39,9 +39,8 @@ def render_tab4(DEVICE, clip_model, clip_processor, INDEX_DIR, EMB_DIR):
     
     feature_sel = st.radio("Alege Demonstrația:", 
         ["1. Matematică Semantică (Vector Arithmetic)", 
-         "2. Proiecție 3D (PCA Latent Space)", 
-         "3. Hibridizare (Latent Interpolation)",
-         "4. Coerența Garderobei (Wardrobe Cohesion)"], horizontal=True)
+         "2. Hibridizare (Latent Interpolation)",
+         "3. Coerența Garderobei (Wardrobe Cohesion)"], horizontal=True)
          
     st.markdown("---")
     
@@ -116,45 +115,7 @@ def render_tab4(DEVICE, clip_model, clip_processor, INDEX_DIR, EMB_DIR):
                             st.markdown(f"<div style='margin-top:5px; font-weight:bold; color:#ec4899;'>Distanța Cos: {score:.3f}</div>", unsafe_allow_html=True)
                             st.markdown("</div>", unsafe_allow_html=True)
 
-    elif "3D" in feature_sel:
-        st.markdown("###  Proiecția PCA 3D a Bazei de Date")
-        st.markdown("<p style='color: #cbd5e1;'>Am redus dimensiunile embedding-urilor de la 512D la 3D folosind PCA pentru a putea 'vizualiza' spațiul semantic creat de AI. Observează cum elementele similare formează 'galaxii' sau clustere!</p>", unsafe_allow_html=True)
-        
-        with st.spinner("Calculăm proiecția PCA..."):
-            proj_3d, meta = get_pca_projection(EMB_DIR)
-            if proj_3d is not None:
-                categories = [m.get("category", "unknown") for m in meta]
-                
-                fig = go.Figure(data=[go.Scatter3d(
-                    x=proj_3d[:, 0],
-                    y=proj_3d[:, 1],
-                    z=proj_3d[:, 2],
-                    mode='markers',
-                    marker=dict(
-                        size=6,
-                        color=[hash(c) % 256 for c in categories],
-                        colorscale='Sunsetdark',
-                        opacity=0.8,
-                        line=dict(width=1, color='rgba(255,255,255,0.1)')
-                    ),
-                    text=[f"Cat: {c}" for c in categories],
-                    hoverinfo='text'
-                )])
-                
-                fig.update_layout(
-                    margin=dict(l=0, r=0, b=0, t=0),
-                    paper_bgcolor='rgba(0,0,0,0)',
-                    plot_bgcolor='rgba(0,0,0,0)',
-                    scene=dict(
-                        xaxis=dict(showbackground=False, showgrid=False, zeroline=False, showticklabels=False),
-                        yaxis=dict(showbackground=False, showgrid=False, zeroline=False, showticklabels=False),
-                        zaxis=dict(showbackground=False, showgrid=False, zeroline=False, showticklabels=False),
-                    ),
-                    height=600
-                )
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.error("Nu s-au găsit datele pentru a genera spațiul 3D.")
+
 
     elif "Hibridizare" in feature_sel:
         st.markdown("###  Latent Space Interpolation (Găsirea Hibridului)")
