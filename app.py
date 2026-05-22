@@ -37,47 +37,92 @@ elif torch.backends.mps.is_available():
 else:
     DEVICE = torch.device("cpu")
 
-YOLO_MODEL_PATH = "yolov8n.pt"
+YOLO_MODEL_PATH = "yolov8n_fashion2.pt"
 YOLO_CONF = 0.35
 MIN_CROP_SIZE = 48
 EMBED_DIM = 256
 IMG_SIZE = 224
 
 class FashionEmbeddingModel(nn.Module):
-    def __init__(self, embed_dim=256):
+    """
+    EfficientNetV2-S backbone + projection head for fashion metric learning.
+
+    EfficientNetV2-S has 7 fused-MBConv/MBConv stages.
+    We freeze stages 0-4 (basic vision features) and unfreeze stages 5-6
+    (high-level semantic features most relevant to fashion similarity).
+    """
+    def __init__(self, embed_dim=128):
         super().__init__()
+
+        # Load EfficientNetV2-S pretrained on ImageNet-21k then fine-tuned on ImageNet-1k
+        # in21k pretraining gives better features than 1k-only for fine-grained tasks
         self.backbone = timm.create_model(
             "tf_efficientnetv2_s.in21k_ft_in1k",
             pretrained=True,
-            num_classes=0,
-            global_pool="avg"
+            num_classes=0,        # remove classification head, output raw features
+            global_pool="avg"     # global average pool after last conv block → 1280-dim
         )
-        for param in self.backbone.parameters(): param.requires_grad = False
-        
+
+        # Freeze all backbone parameters first
+        for param in self.backbone.parameters():
+            param.requires_grad = False
+
+        # Unfreeze the last two blocks (blocks[5] and blocks[6])
+        # These capture high-level semantic and texture features
+        for block in list(self.backbone.blocks)[-2:]:
+            for param in block.parameters():
+                param.requires_grad = True
+
+        # Also unfreeze the final conv + bn layer
+        for param in self.backbone.conv_head.parameters():
+            param.requires_grad = True
+        for param in self.backbone.bn2.parameters():
+            param.requires_grad = True
+
+        # Get backbone output dimension (1280 for EfficientNetV2-S)
         backbone_dim = self.backbone.num_features
+
+        # Projection head — trained entirely from scratch
+        # Compresses 1280 → 128 while learning fashion-specific similarity
         self.projection = nn.Sequential(
             nn.Linear(backbone_dim, 512),
             nn.BatchNorm1d(512),
             nn.ReLU(inplace=True),
-            nn.Dropout(0.2),
+            nn.Dropout(0.2),          # dropout helps prevent overfitting on fashion200k
             nn.Linear(512, embed_dim)
         )
 
     def forward(self, x):
-        features = self.backbone(x)
-        embeddings = self.projection(features)
-        return F.normalize(embeddings, p=2, dim=1)
+        features   = self.backbone(x)               # (batch, 1280)
+        embeddings = self.projection(features)       # (batch, 128)
+        embeddings = F.normalize(embeddings, p=2, dim=1)  # unit sphere
+        return embeddings
+
+
+
 
 class TripletLoss(nn.Module):
+    """
+    L(a, p, n) = max(0, d(a,p) - d(a,n) + margin)
+
+    d() = Euclidean distance on L2-normalized vectors
+    (equivalent to cosine distance since vectors are unit-normalized)
+
+    The loss is zero when the negative is already further from the anchor
+    than the positive by at least the margin.
+    Only violated triplets (loss > 0) produce gradients and cause learning.
+    """
     def __init__(self, margin=0.4):
         super().__init__()
         self.margin = margin
+
     def forward(self, anchor, positive, negative):
-        dist_pos = torch.norm(anchor - positive, p=2, dim=1)
-        dist_neg = torch.norm(anchor - negative, p=2, dim=1)
-        losses = F.relu(dist_pos - dist_neg + self.margin)
+        dist_pos   = torch.norm(anchor - positive, p=2, dim=1)  # (batch,)
+        dist_neg   = torch.norm(anchor - negative, p=2, dim=1)  # (batch,)
+        losses     = F.relu(dist_pos - dist_neg + self.margin)  # (batch,)
         active_frac = (losses > 0).float().mean().item()
         return losses.mean(), active_frac
+
 
 train_transform = transforms.Compose([
     transforms.Resize((IMG_SIZE + 32, IMG_SIZE + 32)),
@@ -306,12 +351,98 @@ with tab1:
                         emb = emb / emb.norm(dim=-1, keepdim=True)
                         emb = emb.squeeze(0).cpu().numpy().astype("float32")
                     else:
-                        tensor = inference_transform(img).unsqueeze(0).to(DEVICE)
-                        emb = model(tensor).squeeze(0).cpu().numpy().astype("float32")
-            
+                        def embed_pil(pil_img):
+                            tensor = inference_transform(pil_img).unsqueeze(0).to(DEVICE)
+                            with torch.no_grad():
+                                emb = model(tensor).squeeze(0).cpu().numpy()
+                            return emb.astype("float32")
+
+                        def retrieve_filtered(query_vec, garment_type, top_k=5):
+                            max_db = len(metadata)
+                            current_k = top_k + 1
+                            results = []
+                            seen = set()
+                            while len(results) < top_k and current_k <= max_db:
+                                sc, idx_arr = faiss_index.search(query_vec.reshape(1, -1), current_k)
+                                new_found = False
+                                for score, idx in zip(sc[0], idx_arr[0]):
+                                    if idx == -1 or idx in seen:
+                                        continue
+                                    seen.add(idx)
+                                    new_found = True
+                                    meta = metadata[idx]
+                                    meta_type = meta.get("garment_type", "").lower().strip()
+                                    query_type = garment_type.lower().strip()
+                                    if query_type not in meta_type and meta_type not in query_type:
+                                        continue
+                                    results.append((meta, float(score)))
+                                    if len(results) == top_k:
+                                        break
+                                if not new_found:
+                                    break
+                                current_k = min(current_k * 2, max_db + 1)
+                            if len(results) == 0:
+                                sc, idx_arr = faiss_index.search(query_vec.reshape(1, -1), top_k + 1)
+                                for score, idx in zip(sc[0], idx_arr[0]):
+                                    if idx == -1:
+                                        continue
+                                    results.append((metadata[idx], float(score)))
+                                    if len(results) == top_k:
+                                        break
+                            return results
+
+                        all_garment_results = []
+                        w, h = img.size
+
+                        try:
+                            detector = YOLO(YOLO_MODEL_PATH, task="detect")
+                            detect_results = detector.predict(
+                                source=img, conf=YOLO_CONF, save=False, verbose=False
+                            )[0]
+                            boxes     = detect_results.boxes.xyxy.cpu().numpy()
+                            class_ids = detect_results.boxes.cls.cpu().numpy().astype(int)
+                            garments  = [detect_results.names[c] for c in class_ids]
+                        except Exception as e:
+                            st.warning(f"Detector failed ({e}), embedding whole image.")
+                            boxes, garments = [], []
+                        
+                        if len(boxes) > 0:
+                            areas = [(x2-x1)*(y2-y1) for x1,y1,x2,y2 in boxes]
+                            sorted_order = sorted(range(len(boxes)), key=lambda i: areas[i], reverse=True)
+                            boxes = boxes[sorted_order]
+                            garments = [garments[i] for i in sorted_order]
+                        
+                        if len(boxes) == 0:
+                            emb = embed_pil(img)
+                        else:
+                            first_emb_set = False
+                            for box, garment_name in zip(boxes, garments):
+                                x1, y1, x2, y2 = box
+                                x1, y1 = max(0, int(x1)), max(0, int(y1))
+                                x2, y2 = min(w, int(x2)), min(h, int(y2))
+                                if (x2 - x1) < MIN_CROP_SIZE or (y2 - y1) < MIN_CROP_SIZE:
+                                    continue
+                                crop = img.crop((x1, y1, x2, y2))
+                                crop_emb = embed_pil(crop)
+                                if not first_emb_set:
+                                    emb = crop_emb
+                                    first_emb_set = True
+                                filtered = retrieve_filtered(crop_emb, garment_name, top_k=5)
+                                all_garment_results.append((garment_name, crop_emb, filtered))
+                            if not first_emb_set:
+                                emb = embed_pil(img)
+
             if faiss_index is not None:
-                scores, indices = faiss_index.search(emb.reshape(1, -1), 5)
-                predicted_category = metadata[indices[0][0]]['category'] if len(indices[0]) > 0 else "Unknown"
+                if 'all_garment_results' in locals() and all_garment_results:
+                    # Use filtered results from first detected garment
+                    first_results = all_garment_results[0][2]
+                    dummy_scores = np.array([[r[1] for r in first_results]])
+                    dummy_indices = np.array([[metadata.index(r[0]) for r in first_results]])
+                    scores, indices = dummy_scores, dummy_indices
+                    predicted_category = first_results[0][0].get('garment_type', 'Unknown') if first_results else 'Unknown'
+                else:
+                    scores, indices = faiss_index.search(emb.reshape(1, -1), 5)
+                    predicted_category = metadata[indices[0][0]]['category'] if len(indices[0]) > 0 else "Unknown"
             else:
                 scores, indices, predicted_category = None, None, "Unknown"
             
@@ -538,22 +669,26 @@ def show_fine_tuning_dialog():
     plot_placeholder = st.empty()
 
     if start_train:
-        manifest = None
-        if dataset_source == "Catalog Curent (YOLO Crops)":
-            manifest_path = EMB_DIR / "crop_manifest.json"
-            if not manifest_path.exists():
-                st.error("crop_manifest.json not found! Extrage crop-urile cu YOLO întâi.")
-                return
-            with open(manifest_path) as f:
-                manifest = json.load(f)
-        elif dataset_source == "Folder Extern (ImageFolder format)":
+        # Încărcăm manifestul local de la bun început, indiferent de sursa de antrenare,
+        # pentru că avem absolută nevoie de el la final pentru FAISS!
+        manifest_path = EMB_DIR / "crop_manifest.json"
+        if not manifest_path.exists():
+            st.error("crop_manifest.json nu a fost găsit! Extrage crop-urile cu YOLO în interfața principală înainte de antrenare.")
+            return
+        with open(manifest_path) as f:
+            local_manifest = json.load(f)
+
+        if dataset_source == "Folder Extern (ImageFolder format)":
             if not Path(custom_dataset_path).exists():
-                st.error("Directorul specificat nu există!")
+                st.error("Directorul extern specificat nu există!")
                 return
 
         log_text = f"**Training started on {DEVICE}**\n\n"
         log_placeholder.markdown(log_text)
 
+        # ──────────────────────────────────────────────────────────────────────
+        # REGIM ANTRENARE 1: CLIP
+        # ──────────────────────────────────────────────────────────────────────
         if train_model_choice == "CLIP (Multi-Modal)":
             from transformers import CLIPProcessor, CLIPModel
             model_id = "openai/clip-vit-base-patch32"
@@ -566,12 +701,15 @@ def show_fine_tuning_dialog():
             if dataset_source == "Catalog Curent (YOLO Crops)":
                 class FashionCLIPDataset(torch.utils.data.Dataset):
                     def __init__(self, mf):
-                        self.items = [v for v in mf.values() if v.get("is_crop", False) and Path(v["crop_path"]).exists()]
+                        if isinstance(mf, dict):
+                            self.items = [v for v in mf.values() if v.get("is_crop", False) and Path(v["crop_path"]).exists()]
+                        else:
+                            self.items = [v for v in mf if v.get("is_crop", False) and Path(v["crop_path"]).exists()]
                     def __len__(self): return len(self.items)
                     def __getitem__(self, idx):
                         it = self.items[idx]
                         return Image.open(it["crop_path"]).convert("RGB"), f"a photo of a {it['category']}"
-                ft_dataset = FashionCLIPDataset(manifest)
+                ft_dataset = FashionCLIPDataset(local_manifest)
             elif dataset_source == "Folder Extern (ImageFolder format)":
                 import torchvision.datasets as tv_datasets
                 class FolderCLIPDataset(torch.utils.data.Dataset):
@@ -615,11 +753,11 @@ def show_fine_tuning_dialog():
             ft_loader = DataLoader(ft_dataset, batch_size=batch_size, shuffle=use_shuffle, collate_fn=clip_collate, num_workers=0)
             optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, clip_model_ft.parameters()), lr=lr)
             history = {"loss": []}
-
+            pb = st.progress(0)
+            
             for epoch in range(int(num_epochs)):
                 clip_model_ft.train()
                 epoch_loss, n_batches = 0.0, 0
-                pb = st.progress(0)
                 for i, batch in enumerate(ft_loader):
                     batch = {k: v.to(DEVICE) for k, v in batch.items()}
                     optimizer.zero_grad()
@@ -628,7 +766,6 @@ def show_fine_tuning_dialog():
                     optimizer.step()
                     epoch_loss += out.loss.item()
                     n_batches = i + 1
-                    pb.progress(min(n_batches / max(len(ft_loader) if hasattr(ft_loader.dataset, "__len__") else 100, 1), 1.0))
                 avg = epoch_loss / max(n_batches, 1)
                 history["loss"].append(avg)
                 log_text += f"Epoch {epoch+1}/{num_epochs} | Loss: {avg:.4f}\n\n"
@@ -636,15 +773,19 @@ def show_fine_tuning_dialog():
 
             st.success("Antrenare CLIP Completa!")
             torch.save(clip_model_ft.state_dict(), CKPT_DIR / "clip_finetuned.pth")
+            #pb.progress(min(n_batches / max(len(ft_loader) if hasattr(ft_loader.dataset, "__len__") else 100, 1), 1.0))
+            pb.progress((epoch + 1) / int(num_epochs))
             fig, ax = plt.subplots(figsize=(8, 4))
             ax.plot(history["loss"], marker="o", color="#ec4899")
             ax.set_title("CLIP Fine-Tuning Loss"); ax.set_xlabel("Epoch"); ax.set_ylabel("Loss"); ax.grid(True)
             plot_placeholder.pyplot(fig)
 
+        # ──────────────────────────────────────────────────────────────────────
+        # REGIM ANTRENARE 2: EFFICIENTNET (TRIPLET LOSS)
+        # ──────────────────────────────────────────────────────────────────────
         else:
-            # EFFICIENTNET PIPELINE
             if dataset_source == "Catalog Curent (YOLO Crops)":
-                eff_dataset = FashionTripletDataset(manifest, transform=train_transform, hard_negative=False)
+                eff_dataset = FashionTripletDataset(local_manifest, transform=train_transform, hard_negative=False)
             elif dataset_source == "Folder Extern (ImageFolder format)":
                 import torchvision.datasets as tv_datasets, random
                 class TripletFolderDataset(torch.utils.data.Dataset):
@@ -671,26 +812,30 @@ def show_fine_tuning_dialog():
                 st.error("HuggingFace nu este suportat pentru EfficientNet Triplet. Folosiți Folder Extern.")
                 return
 
-            eff_loader = DataLoader(eff_dataset, batch_size=batch_size, shuffle=True, num_workers=0, pin_memory=(DEVICE.type != "cpu"))
+            eff_loader = DataLoader(eff_dataset, batch_size=batch_size, shuffle=True, num_workers=0, drop_last=True, pin_memory=(DEVICE.type != "cpu"))
             model_eff = FashionEmbeddingModel(embed_dim=EMBED_DIM).to(DEVICE)
             criterion = TripletLoss(margin=triplet_margin)
+            
             optimizer = torch.optim.AdamW([
                 {"params": [p for block in list(model_eff.backbone.blocks)[-2:] for p in block.parameters()]
                           + list(model_eff.backbone.conv_head.parameters())
                           + list(model_eff.backbone.bn2.parameters()), "lr": lr},
                 {"params": model_eff.projection.parameters(), "lr": lr_head}
             ], weight_decay=1e-4)
+            
             scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=int(num_epochs), eta_min=1e-6)
             history = {"loss": [], "active_fraction": []}
             best_loss = float("inf")
+            pb = st.progress(0)
 
             for epoch in range(int(num_epochs)):
-                if epoch == int(hard_negative_epoch):
+                if epoch >= int(hard_negative_epoch):
                     eff_dataset.set_hard_negative(True)
-                    log_text += "*Switched to HARD negatives*\n\n"
+                    if epoch == int(hard_negative_epoch):
+                        log_text += "*Switched to HARD negatives*\n\n"
+                
                 model_eff.train()
                 epoch_loss, epoch_active, nb = 0.0, 0.0, 0
-                pb = st.progress(0)
                 for i, (anc, pos, neg, _) in enumerate(eff_loader):
                     anc, pos, neg = anc.to(DEVICE), pos.to(DEVICE), neg.to(DEVICE)
                     optimizer.zero_grad()
@@ -700,13 +845,16 @@ def show_fine_tuning_dialog():
                     torch.nn.utils.clip_grad_norm_(model_eff.parameters(), 1.0)
                     optimizer.step()
                     epoch_loss += loss.item(); epoch_active += af; nb = i + 1
-                    pb.progress((i + 1) / len(eff_loader))
+                
+                
                 scheduler.step()
                 al, aa = epoch_loss / nb, epoch_active / nb
                 history["loss"].append(al); history["active_fraction"].append(aa)
                 mode = "Hard" if epoch >= int(hard_negative_epoch) else "Rand"
+                pb.progress((epoch + 1) / int(num_epochs))  # ← asta
                 log_text += f"Epoch {epoch+1:02d}/{num_epochs} [{mode}] | Loss: {al:.4f} | Active: {aa:.1%}\n\n"
                 log_placeholder.markdown(log_text)
+                
                 if al < best_loss:
                     best_loss = al
                     torch.save(model_eff.state_dict(), CKPT_DIR / "best_model.pth")
@@ -718,6 +866,58 @@ def show_fine_tuning_dialog():
             ax2.plot(history["active_fraction"], marker="o", color="orange"); ax2.axvline(x=int(hard_negative_epoch), color="red", linestyle="--")
             ax2.set_title("Active Triplet Fraction"); ax2.grid(True)
             plot_placeholder.pyplot(fig)
+
+        # ======================================================================
+        # 🌟 RE-INDEXAREA SECURIZATĂ A CATALOGULUI LOCAL ÎN FAISS
+        # ======================================================================
+        log_text += "🔄 **Etapa Finală:** Se re-scanează catalogul de haine local cu noul model antrenat...\n\n"
+        log_placeholder.markdown(log_text)
+        
+        if train_model_choice == "CLIP (Multi-Modal)":
+            clip_model_ft.eval()
+        else:
+            model_eff.eval()
+            
+        all_vectors, all_metadata = [], []
+        items_to_index = local_manifest if isinstance(local_manifest, list) else local_manifest.values()
+        
+        with torch.no_grad():
+            for item in items_to_index:
+                try:
+                    if "crop_path" in item and Path(item["crop_path"]).exists():
+                        img = Image.open(item["crop_path"]).convert("RGB")
+                        
+                        if train_model_choice == "CLIP (Multi-Modal)":
+                            inputs = clip_proc_ft(images=img, return_tensors="pt").to(DEVICE)
+                            emb = clip_model_ft.get_image_features(**inputs).squeeze(0).cpu().numpy()
+                        else:
+                            tensor = inference_transform(img).unsqueeze(0).to(DEVICE)
+                            emb = model_eff(tensor).squeeze(0).cpu().numpy()
+                            
+                        all_vectors.append(emb)
+                        all_metadata.append(item)
+                except Exception:
+                    continue
+
+        if len(all_vectors) > 0:
+            vectors_matrix = np.vstack(all_vectors).astype("float32")
+            
+            # Salvăm noile fișiere binare și metadata
+            np.save(EMB_DIR / "vectors.npy", vectors_matrix)
+            with open(EMB_DIR / "metadata.json", "w") as f:
+                json.dump(all_metadata, f, indent=2)
+
+            # Suprascriem indexul FAISS cu noile proprietăți geometrice învățate
+            dimension = vectors_matrix.shape[1]
+            index = faiss.IndexFlatIP(dimension)
+            index.add(vectors_matrix)
+            faiss.write_index(index, str(INDEX_DIR / "fashion.index"))
+
+            log_text += "🎉 **Succes Total!** Catalogul local a fost re-indexat în FAISS. Noile coordonate matematice reflectă perfect antrenarea proaspătă!"
+            log_placeholder.markdown(log_text)
+            st.balloons()
+        else:
+            st.error("Eroare gravă: Nu s-au putut citi imaginile din crop_manifest.json pentru re-indexarea finală FAISS.")
 
 
 st.sidebar.markdown("---")
