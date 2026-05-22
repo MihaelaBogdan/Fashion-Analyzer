@@ -1475,16 +1475,26 @@ with tab3:
             st.markdown("<p style='color: #94a3b8; text-align: center; font-size: 14px; margin-bottom: 25px;'>Utilizând spațiul latent CLIP, combinăm matematic vectorul outfitului tău cu stiluri semantice externe. Modifică direcția stilistică a hainelor tale!</p>", unsafe_allow_html=True)
             
             style_accents = {
-                "Elegant Glamour (Accente Premium & Seară)": "elegant luxury evening styling jewelry gold silver heels diamonds accent",
-                "Streetwear Edge (Accente Urban & Tricouri)": "streetwear cool active urban cap sneakers hoodie streetwear accent",
-                "Bohemian Retro (Accente Vintage & Piele)": "bohemian chic retro vintage leather boots scarf fringe warm accents",
-                "Minimalist Chic (Piese Simple & Monocrome)": "minimalist clean aesthetic solid simple leather jacket minimalist accents"
+                "Elegant Glamour (Accente Premium & Seară)": "luxury elegant glamour evening gown dress premium sleek high-end classy heels fashion",
+                "Streetwear Edge (Accente Urban & Tricouri)": "urban streetwear active cool hip-hop hypebeast oversize baggy hoodie cap sneakers streetwear",
+                "Bohemian Retro (Accente Vintage & Piele)": "retro vintage 70s bohemian chic folk pattern fringe suede leather warm aesthetic",
+                "Minimalist Chic (Piese Simple & Monocrome)": "minimalist chic solid plain black white gray coat simple clean silhouette classic aesthetic"
             }
             
             selected_accent_name = st.selectbox(
                 "Alege Stilul Accent cu care vrei să mixezi matematic outfitul tău:",
                 list(style_accents.keys()),
                 key="algebra_style_selector"
+            )
+            
+            # Slider interactiv pentru intensitatea transformarii stilistice
+            style_weight = st.slider(
+                "Intensitatea noului stil (Glisează pentru a schimba radical recomandările din catalog):",
+                min_value=0.5,
+                max_value=3.5,
+                value=1.8,
+                step=0.1,
+                key="style_weight_slider"
             )
             
             accent_text = style_accents[selected_accent_name]
@@ -1496,8 +1506,8 @@ with tab3:
                     acc_emb = acc_emb / acc_emb.norm(dim=-1, keepdim=True)
                     acc_emb = acc_emb.squeeze(0).cpu().numpy().astype("float32")
                     
-                # Combinăm matematic vectorii: Outfit (80% greutate) + Accent (40% greutate)
-                hybrid_vector = img_emb + 0.40 * acc_emb
+                # Combinăm matematic vectorii folosind intensitatea setată din slider
+                hybrid_vector = img_emb + style_weight * acc_emb
                 hybrid_vector = hybrid_vector / np.linalg.norm(hybrid_vector) # L2 re-normalizare
                 
                 # Căutăm în FAISS produsele cele mai apropiate de acest vector hibrid (folosind un pool mare de 150 de elemente pentru garanția rezultatelor)
@@ -1521,7 +1531,7 @@ with tab3:
                             break
                             
                 if hybrid_matches:
-                    st.markdown(f"<div style='background: rgba(139, 92, 246, 0.1); border: 1px solid rgba(139, 92, 246, 0.2); border-radius: 12px; padding: 12px; margin-bottom: 20px; font-size: 13px; color: #cbd5e1; text-align: center;'>**Matematica Latentă:** <code>[Vector Outfit] + 0.40 * [Vector {selected_accent_name.split(' (')[0]}] = [Vector Hibrid]</code>. Am identificat piesele de catalog care transpun cel mai bine această combinație!</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='background: rgba(139, 92, 246, 0.1); border: 1px solid rgba(139, 92, 246, 0.2); border-radius: 12px; padding: 12px; margin-bottom: 20px; font-size: 13px; color: #cbd5e1; text-align: center;'>**Matematica Latentă:** <code>[Vector Outfit] + {style_weight:.1f} * [Vector {selected_accent_name.split(' (')[0]}] = [Vector Hibrid]</code>. Am identificat piesele de catalog care transpun cel mai bine această combinație!</div>", unsafe_allow_html=True)
                     
                     h_cols = st.columns(4)
                     for idx, (score, meta, sim_path) in enumerate(hybrid_matches):
