@@ -1038,8 +1038,7 @@ if st.sidebar.button("Deschide Panoul de Antrenare (Fine-Tuning)", use_container
     show_fine_tuning_dialog()
 
 with tab3:
-    st.header("AI Outfit Analyzer (WOW Feature)")
-    st.markdown("Încarcă o poză cu un outfit complet. AI-ul va folosi **Object Detection** (YOLO) combinat cu **CLIP Embeddings** pentru a-ți spune ce porți, din ce categorie de stil face parte (ex: streetwear), și îți va oferi **Recomandări Similare**!")
+    st.header("AI Outfit Analyzer")
     
     analyzer_img_file = st.file_uploader("Upload Outfit Image...", type=["jpg", "jpeg", "png"], key="outfit")
     
