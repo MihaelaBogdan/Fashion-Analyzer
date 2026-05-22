@@ -381,10 +381,8 @@ with tab1:
     
     if "CLIP" in embed_engine:
         index_path = INDEX_DIR / "fashion_clip.index"
-        st.info("**Modelul CLIP:** Tehnologie de ultimă generație. Conectează imaginile și textul în același spațiu matematic, permițând căutări semantice extrem de avansate (inclusiv text-to-image) fără antrenare manuală!")
     else:
         index_path = INDEX_DIR / "fashion.index"
-        st.info("**EfficientNetV2:** Model rapid axat exclusiv pe asemănări geometrice și texturi. Funcționează cel mai bine după procesul de fine-tuning local!")
         
     search_type = st.radio("Tipul de Căutare", ["Poză cu o haină (Imagine-la-Imagine)", "Descriere Textuală (Text-la-Imagine)"])
     st.markdown("</div>", unsafe_allow_html=True)
