@@ -417,47 +417,8 @@ with tab1:
     cropped_img = None
     if uploaded_file is not None:
         img = Image.open(uploaded_file).convert("RGB")
-        
-        # Detect objects using cached YOLO
-        detector = get_yolo_model()
-        results = detector.predict(source=img, conf=0.18, verbose=False)[0]
-        all_boxes = results.boxes.xyxy.cpu().numpy()
-        all_class_ids = results.boxes.cls.cpu().numpy().astype(int)
-        
-        if len(all_boxes) > 0:
-            st.markdown("<div class='dark-card' style='margin-bottom: 20px;'>", unsafe_allow_html=True)
-            st.markdown("### Detecție Automată & Crop Inteligent (YOLO)")
-            st.markdown("Am detectat următoarele haine în imagine. Alege piesa specifică pe care vrei să o cauți pentru a elimina fundalul și a evita confuziile:")
-            
-            detected_labels = []
-            for idx, c in enumerate(all_class_ids):
-                label_name = results.names[c] if isinstance(results.names, dict) and c in results.names else f"Item {idx+1}"
-                detected_labels.append(f"{label_name.upper()} (Haină #{idx+1})")
-                
-            crop_choice = st.selectbox(
-                "Alege piesa pentru analiză și căutare:",
-                ["Căutare Imagine Întreagă (Fără Crop)"] + detected_labels
-            )
-            
-            if crop_choice != "Căutare Imagine Întreagă (Fără Crop)":
-                chosen_idx = detected_labels.index(crop_choice)
-                chosen_box = all_boxes[chosen_idx]
-                cropped_img = crop_box(img, chosen_box)
-                
-                # Visual preview
-                cp_col1, cp_col2 = st.columns(2)
-                with cp_col1:
-                    drawn_img = draw_bboxes(img, [chosen_box], [results.names[all_class_ids[chosen_idx]]])
-                    st.image(drawn_img, caption="Haină Selectată pe Poză", use_container_width=True)
-                with cp_col2:
-                    st.image(cropped_img, caption="Crop Transmis la Căutare", use_container_width=True)
-            else:
-                cropped_img = img
-                st.image(img, caption="Imagine Originală Completă", width=350)
-            st.markdown("</div>", unsafe_allow_html=True)
-        else:
-            cropped_img = img
-            st.image(img, caption="Imagine Originală Completă", width=350)
+        cropped_img = img
+        st.image(img, caption="Imagine Originală Completă", width=350)
         
     pth_files = list(CKPT_DIR.glob("*.pth"))
     pth_files.sort(key=lambda p: (p.name != "best_model.pth", p.name))
@@ -761,15 +722,7 @@ with tab1:
                 st.plotly_chart(fig_bar, use_container_width=True)
                 st.markdown("</div>", unsafe_allow_html=True)
                 
-            with st.expander("Analiză Matematică Avansată a Spațiului Vectorial"):
-                st.markdown("""
-                ### Cum funcționează magia din spate?
-                1. **Extragerea Trăsăturilor (Feature Extraction):** Imaginea ta este procesată folosind arhitectura *ViT (Vision Transformer)* din CLIP sau *EfficientNetV2*. Modelul extrage un vector de densitate cu 512 dimensiuni.
-                2. **L2 Normalization:** Vectorul este normalizat $\\frac{v}{\\|v\\|_2}$ pentru a fi plasat pe o hipersferă. Aceasta asigură că magnitudinea nu influențează calculul distanței.
-                3. **Distanța Cosinus:** Pentru a găsi haine similare, folosim indexul FAISS pentru a calcula produsul scalar (care acum e echivalent cu distanța cosinus, datorită normalizării L2) între vectorul tău și toți cei 2000 de vectori din baza de date. Formulele sunt:
-                $$ \\text{sim}(u, v) = \\frac{u \\cdot v}{\\|u\\| \\|v\\|} $$
-                4. **Căutare Cross-Modală:** Când folosești text, encoder-ul de text din CLIP transformă textul tău în *același spațiu matematic* ca și imaginile, permițând comparația directă!
-                """)
+
             
             if faiss_index is not None:
                 if final_matches:
@@ -805,7 +758,6 @@ with tab1:
                 # Matricea de Corelație a Vectorilor
                 st.markdown("<h3 style='margin-top: 40px; color: #f8fafc;'>Matricea de Corelație Semantică (Heatmap)</h3>", unsafe_allow_html=True)
                 st.markdown("<div class='dark-card'>", unsafe_allow_html=True)
-                st.markdown("Această matrice analizează corelația matematică directă (Cosinus Similarity) dintre **imaginea căutată (Query)** și topul **rezultatelor găsite**. Ea demonstrează cum vectorii modelului grupează hainele nu doar în funcție de similaritatea cu elementul căutat, ci și între ele (formând un cluster semantic coerent).")
                 
                 try:
                     # Construim matricea pe baza vectorilor reali
