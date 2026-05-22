@@ -187,33 +187,25 @@ else:
 YOLO_MODEL_PATH = "yolov8n.pt"
 YOLO_CONF = 0.35
 MIN_CROP_SIZE = 48
-EMBED_DIM = 256
+EMBED_DIM = 512
 IMG_SIZE = 224
 
 class FashionEmbeddingModel(nn.Module):
-    def __init__(self, embed_dim=256):
+    def __init__(self, embed_dim=512):
         super().__init__()
-        self.backbone = timm.create_model(
-            "tf_efficientnetv2_s.in21k_ft_in1k",
-            pretrained=True,
-            num_classes=0,
-            global_pool="avg"
-        )
-        for param in self.backbone.parameters(): param.requires_grad = False
-        
-        backbone_dim = self.backbone.num_features
+        self.backbone = timm.create_model("tf_efficientnetv2_s", pretrained=True, num_classes=0)
+        feat_dim = self.backbone.num_features
         self.projection = nn.Sequential(
-            nn.Linear(backbone_dim, 512),
-            nn.BatchNorm1d(512),
-            nn.ReLU(inplace=True),
+            nn.Linear(feat_dim, feat_dim // 2),
+            nn.GELU(),
             nn.Dropout(0.2),
-            nn.Linear(512, embed_dim)
+            nn.Linear(feat_dim // 2, embed_dim),
         )
 
     def forward(self, x):
-        features = self.backbone(x)
-        embeddings = self.projection(features)
-        return F.normalize(embeddings, p=2, dim=1)
+        f = self.backbone(x)
+        e = self.projection(f)
+        return F.normalize(e, dim=-1)
 
 class TripletLoss(nn.Module):
     def __init__(self, margin=0.4):
