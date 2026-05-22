@@ -1299,7 +1299,7 @@ with tab3:
         wav_buf.write(pcm.tobytes())
         wav_buf.seek(0)
         st.markdown(f"**Coloana Sonoră a Outfitului Tău** — stil *{best_style_ro}*, {bpm} BPM:")
-        st.audio(wav_buf, format="audio/wav", autoplay=True)
+        st.audio(wav_buf, format="audio/wav", autoplay=False)
  
         # RECOMANDARI FAISS
         if index_path.exists() and meta_path.exists():
