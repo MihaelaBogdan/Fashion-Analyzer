@@ -1501,7 +1501,23 @@ with tab3:
             
             with st.spinner("Se calculează algebra latentă..."):
                 with torch.no_grad():
-                    acc_inputs = clip_processor(text=[accent_text], return_tensors="pt", padding=True).to(DEVICE)
+                    # Clasificare silențioasă de gen (bărbat vs femeie) bazată pe CLIP
+                    gender_inputs = clip_processor(
+                        text=["menswear men clothing male style", "womenswear women clothing female style"],
+                        images=outfit_img,
+                        return_tensors="pt",
+                        padding=True
+                    ).to(DEVICE)
+                    gender_probs = clip_model(**gender_inputs).logits_per_image.softmax(dim=1)[0].cpu().numpy()
+                    
+                    if gender_probs[0] > gender_probs[1]:
+                        gender_suffix = " menswear men male gentleman"
+                    else:
+                        gender_suffix = " womenswear women female lady"
+                        
+                    enriched_accent = accent_text + gender_suffix
+                    
+                    acc_inputs = clip_processor(text=[enriched_accent], return_tensors="pt", padding=True).to(DEVICE)
                     acc_emb = clip_model.get_text_features(**acc_inputs).pooler_output
                     acc_emb = acc_emb / acc_emb.norm(dim=-1, keepdim=True)
                     acc_emb = acc_emb.squeeze(0).cpu().numpy().astype("float32")
