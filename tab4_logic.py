@@ -21,7 +21,6 @@ def get_pca_projection(emb_dir):
     with open(meta_path) as f:
         metadata = json.load(f)
         
-    # sample to 1000 for faster render if large
     n_samples = min(1000, len(vectors))
     indices = np.random.choice(len(vectors), n_samples, replace=False)
     
@@ -73,12 +72,10 @@ def render_tab4(DEVICE, clip_model, clip_processor, INDEX_DIR, EMB_DIR):
         if st.button(" Calculează Ecuația Vectorială", use_container_width=True) and math_img_file:
             with st.spinner("Procesare matriceală..."):
                 with torch.no_grad():
-                    # 1. Image Embedding
                     inputs_img = clip_processor(images=img_a, return_tensors="pt").to(DEVICE)
                     img_emb = clip_model.get_image_features(**inputs_img).pooler_output
                     img_emb = img_emb / img_emb.norm(dim=-1, keepdim=True)
                     
-                    # 2. Text Plus
                     if text_plus:
                         inputs_p = clip_processor(text=[text_plus], return_tensors="pt").to(DEVICE)
                         p_emb = clip_model.get_text_features(**inputs_p).pooler_output
@@ -86,7 +83,6 @@ def render_tab4(DEVICE, clip_model, clip_processor, INDEX_DIR, EMB_DIR):
                     else:
                         p_emb = torch.zeros_like(img_emb)
                         
-                    # 3. Text Minus
                     if text_minus:
                         inputs_m = clip_processor(text=[text_minus], return_tensors="pt").to(DEVICE)
                         m_emb = clip_model.get_text_features(**inputs_m).pooler_output
@@ -94,7 +90,6 @@ def render_tab4(DEVICE, clip_model, clip_processor, INDEX_DIR, EMB_DIR):
                     else:
                         m_emb = torch.zeros_like(img_emb)
                         
-                    # THE MATH
                     final_emb = img_emb + 0.5 * p_emb - 0.5 * m_emb
                     final_emb = final_emb / final_emb.norm(dim=-1, keepdim=True)
                     final_emb_np = final_emb.squeeze(0).cpu().numpy().astype("float32")
@@ -145,7 +140,6 @@ def render_tab4(DEVICE, clip_model, clip_processor, INDEX_DIR, EMB_DIR):
                         e2 = clip_model.get_image_features(**i2).pooler_output
                         e2 = e2 / e2.norm(dim=-1, keepdim=True)
                         
-                        # Interpolation
                         e_hybrid = (e1 + e2) / 2.0
                         e_hybrid = e_hybrid / e_hybrid.norm(dim=-1, keepdim=True)
                         e_hybrid_np = e_hybrid.squeeze(0).cpu().numpy().astype("float32")
@@ -174,7 +168,6 @@ def render_tab4(DEVICE, clip_model, clip_processor, INDEX_DIR, EMB_DIR):
         if wardrobe_files and len(wardrobe_files) >= 2:
             st.markdown(f"**Garderoba ta conține {len(wardrobe_files)} piese selectate:**")
             
-            # Afișare previzualizare piese încărcate
             grid_cols = st.columns(min(6, len(wardrobe_files)))
             images = []
             for i, f in enumerate(wardrobe_files):
@@ -194,11 +187,9 @@ def render_tab4(DEVICE, clip_model, clip_processor, INDEX_DIR, EMB_DIR):
                             embs.append(emb.squeeze(0).cpu().numpy().astype("float32"))
                     
                     embs = np.array(embs)
-                    # Produs scalar pentru distanță Cosinus (vectori L2 normalizați)
                     sim_matrix = np.dot(embs, embs.T)
                     sim_matrix = np.clip(sim_matrix, 0, 1)
                     
-                    # Media elementelor de pe diagonala superioară
                     n = len(images)
                     triu_indices = np.triu_indices(n, k=1)
                     avg_sim = np.mean(sim_matrix[triu_indices]) if n > 1 else 1.0
@@ -233,11 +224,9 @@ def render_tab4(DEVICE, clip_model, clip_processor, INDEX_DIR, EMB_DIR):
                         </div>
                         """, unsafe_allow_html=True)
                         
-                        # Calculăm vectorul mediu (Centroidul Garderobei)
                         centroid_emb = np.mean(embs, axis=0)
                         centroid_emb = centroid_emb / np.linalg.norm(centroid_emb)
                         
-                        # Proiectăm pe direcții stilistice semantice
                         semantic_concepts = ["Streetwear", "Business Casual", "Vintage", "Bohemian", "Sport", "Elegant Evening", "Minimalist"]
                         with torch.no_grad():
                             concept_inputs = clip_processor(text=semantic_concepts, return_tensors="pt", padding=True).to(DEVICE)
@@ -269,12 +258,10 @@ def render_tab4(DEVICE, clip_model, clip_processor, INDEX_DIR, EMB_DIR):
                         )
                         st.plotly_chart(fig_heat, use_container_width=True)
                         
-                    # Recomandări FAISS folosind Centroidul Garderobei
                     st.markdown("---")
                     st.markdown("<h3 style='color: #f8fafc; text-align: center;'>Piese Recomandate pentru Completarea Garderobei</h3>", unsafe_allow_html=True)
                     st.markdown("<p style='text-align: center; color: #94a3b8; font-size: 14px;'>Folosind Centroidul Garderobei tale, am interogat catalogul local pentru a găsi piesele care se armonizează cel mai bine cu ceea ce deții deja.</p>", unsafe_allow_html=True)
                     
-                    # Recomandări FAISS folosind Centroidul Garderobei (deduplicate)
                     scores, indices = faiss_index.search(centroid_emb.reshape(1, -1), 30)
                     
                     unique_recs = []

@@ -92,7 +92,6 @@ def scrape_fashion_products(query, num_results=3):
     except Exception:
         pass
         
-    # NEW: Highly realistic backup system to guarantee results always display
     if len(products) < num_results:
         fallbacks = [
             {
@@ -374,7 +373,7 @@ with tab1:
         </style>
     """, unsafe_allow_html=True)
 
-    st.markdown("<h2 style='text-align: center; margin-bottom: 30px;'><span style='background: -webkit-linear-gradient(#ec4899, #8b5cf6); -webkit-background-clip: text; -webkit-text-fill-color: transparent;'>Căutare Inteligentă de Modă & Vizualizare Vectori</span></h2>", unsafe_allow_html=True)
+    st.markdown("<h2 style='text-align: center; margin-bottom: 30px;'><span style='background: -webkit-linear-gradient(#ec4899, #8b5cf6); -webkit-background-clip: text; -webkit-text-fill-color: transparent;'>Căutare Semantică de Modă</span></h2>", unsafe_allow_html=True)
     
     st.markdown("<div class='dark-card'>", unsafe_allow_html=True)
     embed_engine = st.selectbox("Alege Motorul de Vectorizare (AI):", ["CLIP (Model Cross-Modal Vizual + Text)", "EfficientNetV2 (Doar Vizual - Baseline)"])
@@ -384,10 +383,9 @@ with tab1:
     else:
         index_path = INDEX_DIR / "fashion.index"
         
-    search_type = st.radio("Tipul de Căutare", ["Poză cu o haină (Imagine-la-Imagine)", "Descriere Textuală (Text-la-Imagine)"])
+    search_type = st.radio("Tipul de Căutare", ["Poză cu un obiect vestimentar (Imagine-la-Imagine)", "Descriere Textuală (Text-la-Imagine)"])
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # Încărcăm categoriile unice din metadata locală pentru filtrare avansată
     all_categories = []
     meta_path = EMB_DIR / "metadata.json"
     if meta_path.exists():
@@ -408,7 +406,7 @@ with tab1:
     uploaded_file = None
     text_query = ""
     
-    if search_type == "Poză cu o haină (Imagine-la-Imagine)":
+    if search_type == "Poză cu un obiect vestimentar (Imagine-la-Imagine)":
         uploaded_file = st.file_uploader("Upload Image...", type=["jpg", "jpeg", "png"])
     else:
         text_query = st.text_input("Caută prin text (ex: Rochie roșie elegantă):")
@@ -545,19 +543,16 @@ with tab1:
                 "Sunglasses": "Sunglasses (Ochelari de Soare)"
             }
 
-            # Filtrare Avansată a Bazei de Date FAISS
             filtered_matches = []
             predicted_category = "Unknown"
             seen_paths = set()
             if faiss_index is not None:
-                # Căutăm 200 de rezultate brute pentru a asigura suficiente match-uri după filtrarea pe criterii și deduplicare
                 raw_scores, raw_indices = faiss_index.search(emb.reshape(1, -1), 200)
                 if len(raw_indices[0]) > 0:
                     for score, idx in zip(raw_scores[0], raw_indices[0]):
                         if idx == -1: continue
                         meta = metadata[idx]
                         
-                        # Prevenire duplicare - fiecare recomandare apare o singură dată (preferăm source_image)
                         img_path_to_use = meta.get("source_image", meta["crop_path"])
                         if not Path(img_path_to_use).exists():
                             img_path_to_use = meta["crop_path"]
@@ -567,16 +562,13 @@ with tab1:
                                 continue
                             seen_paths.add(img_path_to_use)
                         
-                        # Calcul procentaj similaritate
                         sim_pct = int((score + 1) / 2 * 100) if "CLIP" in embed_engine else int((1 - score/2) * 100)
                         if score <= 1.0: sim_pct = int(score * 100)
                         else: sim_pct = int((1 / (1 + score)) * 100)
                         
-                        # Filtrare după Categorie
                         if category_filter and meta.get("category") not in category_filter:
                             continue
                             
-                        # Filtrare după prag similaritate minimă
                         if sim_pct < min_similarity:
                             continue
                             
@@ -593,7 +585,6 @@ with tab1:
             else:
                 raw_scores, raw_indices = None, None
             
-            # Reținem doar numărul de rezultate ales de utilizator
             final_matches = filtered_matches[:num_results]
             
             st.markdown(f"### Căutări pentru: **{text_query if search_type == 'Descriere Textuală (Text-la-Imagine)' else 'Imagine Decupată'}**")
@@ -604,11 +595,9 @@ with tab1:
                 if img is not None:
                     st.image(cropped_img, caption="Haină Căutată (Decupată)", use_container_width=True)
                     
-                    # Extrage și randează paleta de culori dominante (K-Means / Adaptive Palette)
                     dominant_colors = extract_dominant_colors(cropped_img, 4)
                     st.markdown(render_color_palette(dominant_colors), unsafe_allow_html=True)
                     
-                    # Zero-shot validation pentru eliminarea bias-ului Kurtas
                     zs_labels = ["dress", "skirt", "jeans", "t-shirt", "shirt", "jacket", "sweater", "hoodie", "pants", "shoes", "bag", "traditional kurta", "shorts", "coat", "blouse", "suit"]
                     ZS_MAPPING = {
                         "dress": "Dress (Rochie)",
@@ -644,8 +633,6 @@ with tab1:
                     st.markdown(f"<div class='metric-card'><div class='metric-label'>Haină Identificată (AI CLIP)</div><div class='metric-value'>{zs_display.upper()}</div></div>", unsafe_allow_html=True)
                     st.markdown(f"<div class='metric-card' style='background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);'><div class='metric-label'>Cel mai similar în Catalog (FAISS)</div><div class='metric-value'>{friendly_predicted.upper()}</div></div>", unsafe_allow_html=True)
                     
-                    # Explicație / Soluționare Kurtas Bias
-                    # Explicație / Soluționare Bias Categorie Catalog Local
                     if zs_best == "dress" and ("Kurta" in predicted_category or "Nightdress" in predicted_category or "Night suits" in predicted_category or "Baby Dolls" in predicted_category):
                         st.warning("**Corecție Acuratețe:** AI-ul vizual (CLIP Zero-Shot) detectează corect că piesa este o **Rochie (Dress)** de zi/seară. Potrivirea din catalogul local ('Cămașă de Noapte' / 'Kurta') provine exclusiv din etichetele limitate ale catalogului de referință. Recomandările similare vor reflecta însă corect designul vizual!")
                     
@@ -659,7 +646,6 @@ with tab1:
                 import plotly.graph_objects as go
                 st.markdown("<div class='dark-card'>", unsafe_allow_html=True)
                 
-                # Radar Chart for Semantic / Embedding Signature
                 if "CLIP" in embed_engine:
                     semantic_concepts = ["Streetwear", "Elegant", "Sport", "Vintage", "Minimalist", "Summer", "Winter", "Colorful", "Dark", "Denim", "Leather"]
                     with torch.no_grad():
@@ -669,8 +655,7 @@ with tab1:
                         concept_embs = concept_embs.cpu().numpy().astype("float32")
                     
                     sims = np.dot(concept_embs, emb.reshape(-1))
-                    # Rescale to 0-1 for radar
-                    top_vals = np.clip((sims + 0.1) * 2, 0, 1) # simple scaling to look good
+                    top_vals = np.clip((sims + 0.1) * 2, 0, 1)
                     categories = semantic_concepts
                     chart_title = "Distribuția Conceptelor Semantice (Proiecție Cross-Modală)"
                 else:
@@ -705,7 +690,6 @@ with tab1:
                 )
                 st.plotly_chart(fig, use_container_width=True)
                 
-                # Bar chart pentru vectorul complet
                 fig_bar = go.Figure(data=[
                     go.Bar(y=emb, marker_color='#8b5cf6')
                 ])
@@ -728,7 +712,6 @@ with tab1:
                 if final_matches:
                     st.markdown("<h3 style='margin-top: 30px; color: #f8fafc;'>Top Articole Similare din Catalog</h3>", unsafe_allow_html=True)
                     
-                    # Rânduri dinamice în funcție de numărul de rezultate selectat (max 5 sau 6 coloane pe rând)
                     cols_per_row = 5 if len(final_matches) <= 5 else 6
                     chunked_matches = [final_matches[i:i + cols_per_row] for i in range(0, len(final_matches), cols_per_row)]
                     
@@ -755,17 +738,15 @@ with tab1:
                 else:
                     st.info("Niciun articol din catalogul local nu corespunde criteriilor tale de filtrare avansată! Încearcă să reduci pragul de similaritate sau să selectezi mai multe categorii.")
                 
-                # Matricea de Corelație a Vectorilor
                 st.markdown("<h3 style='margin-top: 40px; color: #f8fafc;'>Matricea de Corelație Semantică (Heatmap)</h3>", unsafe_allow_html=True)
                 st.markdown("<div class='dark-card'>", unsafe_allow_html=True)
                 
                 try:
-                    # Construim matricea pe baza vectorilor reali
-                    actual_embs = [emb] # index 0 este elementul căutat (query)
+                    actual_embs = [emb]
                     labels = ["QUERY"]
                     
                     with torch.no_grad():
-                        for i, match in enumerate(final_matches[:6]): # Limita de corelație pentru vizibilitate optimă
+                        for i, match in enumerate(final_matches[:6]):
                             idx = match["idx"]
                             meta = match["meta"]
                             sim_path = match.get("img_path", meta["crop_path"])
@@ -785,17 +766,15 @@ with tab1:
                                 actual_embs.append(res_emb)
                                 
                     actual_embs = np.array(actual_embs)
-                    # Exact cosine similarity matrix using dot product (since vectors are L2 normalized)
                     corr_matrix = np.dot(actual_embs, actual_embs.T)
                     
-                    # Normalize to [0,1] range for better heatmap display if negative values exist
                     corr_matrix = np.clip(corr_matrix, 0, 1)
                             
                     import plotly.express as px
                     fig_heat = px.imshow(
                         corr_matrix, 
                         x=labels, y=labels, 
-                        color_continuous_scale="Purpor", # Purple to Pink scale
+                        color_continuous_scale="Purpor",
                         text_auto=".2f",
                         aspect="auto"
                     )
@@ -954,7 +933,6 @@ def show_fine_tuning_dialog():
             plot_placeholder.pyplot(fig)
 
         else:
-            # EFFICIENTNET PIPELINE
             if dataset_source == "Catalog Curent (YOLO Crops)":
                 eff_dataset = FashionTripletDataset(manifest, transform=train_transform, hard_negative=False)
             elif dataset_source == "Folder Extern (ImageFolder format)":
@@ -1047,7 +1025,6 @@ with tab3:
         st.image(outfit_img, caption="Analizăm Outfit-ul...", width=400)
         
         with st.spinner("Detectam hainele si analizam stilul..."):
-            # YOLO din cache local
             _YOLO_CACHE = "/Users/mihaela/.cache/huggingface/hub/models--louisJLN--yolo8-fashionpedia/snapshots/f98e49e0336097c355473cbb85e8187770820521/results/yolov8n-fashionpedia-1.onnx"
             try:
                 if Path(_YOLO_CACHE).exists():
@@ -1074,7 +1051,6 @@ with tab3:
                 class_ids     = all_class_ids[vi] if vi else []
                 detected_names = [results.names[c] for c in class_ids]
 
-            # CLIP
             model_id = "openai/clip-vit-base-patch32"
             clip_model = CLIPModel.from_pretrained(model_id).to(DEVICE)
             clip_processor = CLIPProcessor.from_pretrained(model_id)
@@ -1111,16 +1087,12 @@ with tab3:
             index_path = INDEX_DIR / "fashion_clip.index"
             meta_path  = EMB_DIR   / "metadata.json"
 
-        # Generare Coloană Sonoră bazată GENUIN pe Culorile și Luminozitatea Outfitului
         dominant_colors = extract_dominant_colors(outfit_img, 4)
         
-        # Calculăm luminozitatea medie a outfitului
         brightness = sum([0.299*c[0] + 0.587*c[1] + 0.114*c[2] for c in dominant_colors]) / 4
         
-        # Setăm tempo-ul (BPM) în funcție de luminozitate (între 70 și 130 BPM)
         bpm = int(70 + (brightness / 255) * 60)
         
-        # Culoarea primară determină tonalitatea muzicală (Hue / Nuanța)
         r, g, b = dominant_colors[0]
         max_c = max(r, g, b)
         min_c = min(r, g, b)
@@ -1131,26 +1103,21 @@ with tab3:
             elif max_c == g: hue = (60 * ((b - r) / diff) + 120) % 360
             else: hue = (60 * ((r - g) / diff) + 240) % 360
             
-        # Selectăm gama muzicală bazată pe nuanța dominantă (Hue)
-        # 1. Nuanțe calde (Roșu, Roz, Portocaliu: 0-60, 300-360) -> La Minor Pentatonic (Dinamism / Streetwear)
-        # 2. Nuanțe reci (Verde, Albastru: 60-240) -> Do Major Pentatonic (Calm, Luminos, Retro / Boho)
-        # 3. Nuanțe de Violet / Închise (240-300) -> La Minor Armonic (Dramatic, Elegant, Minimalist)
         if (hue >= 0 and hue < 60) or hue >= 300:
-            scale = [220, 261, 293, 329, 392, 329, 293, 261] # La Minor Pentatonic
+            scale = [220, 261, 293, 329, 392, 329, 293, 261]
             wave_type = "square" if brightness < 120 else "triangle"
             scale_name = "La Minor Pentatonic (Streetwear / Activ / Urban)"
         elif hue >= 60 and hue < 240:
-            scale = [261, 293, 329, 392, 440, 392, 329, 293] # Do Major Pentatonic
+            scale = [261, 293, 329, 392, 440, 392, 329, 293]
             wave_type = "sine"
             scale_name = "Do Major Pentatonic (Retro / Bohemian / Cald)"
         else:
-            scale = [220, 247, 261, 311, 329, 311, 261, 247] # La Minor Armonic
+            scale = [220, 247, 261, 311, 329, 311, 261, 247]
             wave_type = "triangle" if brightness < 120 else "sine"
             scale_name = "La Minor Armonic (Elegant / Minimalist / Misterios)"
             
         mel_notes = scale
         
-        # Traducem categoriile de stil în limba Română
         STYLE_RO = {
             "streetwear aesthetic": "Streetwear Aesthetic",
             "business casual":      "Business Casual",
@@ -1162,7 +1129,6 @@ with tab3:
         }
         best_style_ro = STYLE_RO.get(best_style, best_style.title())
         
-        # AFIȘARE REZULTATE IN ROMÂNĂ
         st.success(f"### STIL DETECTAT: {best_style_ro.upper()}")
         detected_str = ", ".join(detected_clothes).title() if detected_clothes else "Îmbrăcăminte Generală"
         st.markdown(f"**Piese vestimentare detectate:** {detected_str}")
@@ -1198,7 +1164,6 @@ with tab3:
         peak = np.max(np.abs(audio_arr))
         if peak > 0: audio_arr = audio_arr / peak * 0.9
 
-        # VIZUALIZARE PIPELINE
         st.markdown("---")
         st.markdown("### Cum se Transformă Imaginea ta în Sunet? (Visual Synth Pipeline)")
         pipe_cols = st.columns([1, 2, 2])
@@ -1234,7 +1199,6 @@ with tab3:
             ax_w.set_ylabel("Amplitudine", color="white", fontsize=8)
             st.pyplot(fig_w, use_container_width=True)
 
-        # PLAYER AUDIO
         import io, struct
         pcm = (audio_arr * 32767).astype(np.int16)
         wav_buf = io.BytesIO()
@@ -1250,19 +1214,16 @@ with tab3:
         st.markdown(f"**Coloana Sonoră a Outfitului Tău** — stil *{best_style_ro}*, {bpm} BPM:")
         st.audio(wav_buf, format="audio/wav", autoplay=False)
  
-        # RECOMANDARI FAISS
         if index_path.exists() and meta_path.exists():
             import faiss
             import json
             faiss_index = faiss.read_index(str(index_path))
             with open(meta_path) as f: metadata = json.load(f)
             
-            # Căutăm 30 de rezultate brute pentru a asigura exact 5 elemente unice de calitate superioară
             scores, indices = faiss_index.search(img_emb.reshape(1, -1), 30)
             st.markdown("---")
             st.markdown("<h3 style='color: #f8fafc;'>Top Recomandări Similare din Catalog</h3>", unsafe_allow_html=True)
             
-            # Filtru de deduplicare - fiecare recomandare apare o singură dată
             unique_matches = []
             seen_paths = set()
             for score, idx in zip(scores[0], indices[0]):
@@ -1355,13 +1316,10 @@ with tab3:
                 return []
 
             valid_items = [item for item in detected_names + detected_clothes if item in CATALOG]
-            valid_items = list(dict.fromkeys(valid_items)) # unique items
+            valid_items = list(dict.fromkeys(valid_items))
             if not valid_items:
-                valid_items = ["t-shirt", "jeans"] # fallback
+                valid_items = ["t-shirt", "jeans"]
 
-            # ----------------------------------------------------
-            # RECOMANDĂRI LOCALE FILTRATE DEDICATE (Exact 8 items unice per categorie)
-            # ----------------------------------------------------
             st.markdown("---")
             st.markdown("<h3 style='color: #f8fafc; font-family: \"Inter\", sans-serif;'>Recomandări Dedicate din Catalog (FAISS Filtrate pe Categorii)</h3>", unsafe_allow_html=True)
             st.markdown("<div style='color: #94a3b8; margin-bottom: 25px; font-size: 14px;'>Folosind vectorul de embeddings al outfitului tău, am interogat catalogul local pentru a găsi până la **8 piese unice** din fiecare categorie identificată:</div>", unsafe_allow_html=True)
@@ -1371,7 +1329,6 @@ with tab3:
                 if not mapped_cats:
                     mapped_cats = [item.title(), item.upper(), item.lower()]
                 
-                # Căutăm 150 de elemente brute din baza de date vectoriale
                 cat_scores, cat_indices = faiss_index.search(img_emb.reshape(1, -1), 150)
                 
                 cat_unique_matches = []
@@ -1390,7 +1347,7 @@ with tab3:
                                 continue
                             cat_seen_paths.add(sim_path)
                             cat_unique_matches.append((score, meta, sim_path))
-                            if len(cat_unique_matches) >= 8: # exact 8 elements for richer results!
+                            if len(cat_unique_matches) >= 8:
                                 break
                                 
                 if cat_unique_matches:
@@ -1416,9 +1373,6 @@ with tab3:
                                 """, unsafe_allow_html=True)
                                 st.markdown("</div>", unsafe_allow_html=True)
 
-            # ----------------------------------------------------
-            # TRANSFORMATOR DE STIL PRIN ALGEBRĂ VECTORIALĂ
-            # ----------------------------------------------------
             st.markdown("---")
             st.markdown("<h3 style='color: #f8fafc; text-align: center; margin-top: 30px; font-family: \"Inter\", sans-serif;'>Transformator de Stil prin Algebră Vectorială (Mix & Match Embeddings)</h3>", unsafe_allow_html=True)
             st.markdown("<p style='color: #94a3b8; text-align: center; font-size: 14px; margin-bottom: 25px;'>Utilizând spațiul latent CLIP, combinăm matematic vectorul outfitului tău cu stiluri semantice externe. Modifică direcția stilistică a hainelor tale!</p>", unsafe_allow_html=True)
@@ -1436,7 +1390,6 @@ with tab3:
                 key="algebra_style_selector"
             )
             
-            # Slider interactiv pentru intensitatea transformarii stilistice
             style_weight = st.slider(
                 "Intensitatea noului stil (Glisează pentru a schimba radical recomandările din catalog):",
                 min_value=0.5,
@@ -1450,7 +1403,6 @@ with tab3:
             
             with st.spinner("Se calculează algebra latentă..."):
                 with torch.no_grad():
-                    # Clasificare silențioasă de gen (bărbat vs femeie) bazată pe CLIP
                     gender_inputs = clip_processor(
                         text=["menswear men clothing male style", "womenswear women clothing female style"],
                         images=outfit_img,
@@ -1471,11 +1423,9 @@ with tab3:
                     acc_emb = acc_emb / acc_emb.norm(dim=-1, keepdim=True)
                     acc_emb = acc_emb.squeeze(0).cpu().numpy().astype("float32")
                     
-                # Combinăm matematic vectorii folosind intensitatea setată din slider
                 hybrid_vector = img_emb + style_weight * acc_emb
-                hybrid_vector = hybrid_vector / np.linalg.norm(hybrid_vector) # L2 re-normalizare
+                hybrid_vector = hybrid_vector / np.linalg.norm(hybrid_vector)
                 
-                # Căutăm în FAISS produsele cele mai apropiate de acest vector hibrid (folosind un pool mare de 150 de elemente pentru garanția rezultatelor)
                 hybrid_scores, hybrid_indices = faiss_index.search(hybrid_vector.reshape(1, -1), 150)
                 
                 hybrid_matches = []
@@ -1496,8 +1446,6 @@ with tab3:
                             break
                             
                 if hybrid_matches:
-                    st.markdown(f"<div style='background: rgba(139, 92, 246, 0.1); border: 1px solid rgba(139, 92, 246, 0.2); border-radius: 12px; padding: 12px; margin-bottom: 20px; font-size: 13px; color: #cbd5e1; text-align: center;'>**Matematica Latentă:** <code>[Vector Outfit] + {style_weight:.1f} * [Vector {selected_accent_name.split(' (')[0]}] = [Vector Hibrid]</code>. Am identificat piesele de catalog care transpun cel mai bine această combinație!</div>", unsafe_allow_html=True)
-                    
                     h_cols = st.columns(4)
                     for idx, (score, meta, sim_path) in enumerate(hybrid_matches):
                         with h_cols[idx]:
@@ -1514,15 +1462,11 @@ with tab3:
                             """, unsafe_allow_html=True)
                             st.markdown("</div>", unsafe_allow_html=True)
 
-            # ----------------------------------------------------
-            # RECOMANDĂRI ONLINE PRIN SCRAPING
-            # ----------------------------------------------------
             st.markdown("---")
-            st.markdown("<h3 style='color: #f8fafc; font-family: \"Inter\", sans-serif;'>Recomandări Magazine Online (Scraping Real-Time)</h3>", unsafe_allow_html=True)
+            st.markdown("<h3 style='color: #f8fafc; font-family: \"Inter\", sans-serif;'>Recomandări Magazine Online</h3>", unsafe_allow_html=True)
             st.markdown("<div style='color: #94a3b8; margin-bottom: 20px; font-size: 14px;'>Am interogat în timp real stocurile magazinelor de fashion pentru a-ți aduce cele mai apropiate piese vestimentare online!</div>", unsafe_allow_html=True)
             
-            # Loop through each category and fetch dynamic results
-            for item in valid_items[:3]: # limit to top 3 detected items to avoid clutter
+            for item in valid_items[:3]:
                 st.markdown(f"<h4 style='color: #ec4899; margin: 15px 0 10px 0;'>Alternative în magazine pentru: {item.upper()}</h4>", unsafe_allow_html=True)
                 scraped_items = scrape_fashion_products(item, num_results=3)
                 
@@ -1555,8 +1499,6 @@ with tab3:
 with tab4:
     import tab4_logic
     
-    # We load CLIP dynamically if not loaded, or just pass the ones from Tab3.
-    # But since Tab3 loads them conditionally, let's load them here if needed.
     if 'clip_model' not in locals():
         model_id = "openai/clip-vit-base-patch32"
         from transformers import CLIPProcessor, CLIPModel

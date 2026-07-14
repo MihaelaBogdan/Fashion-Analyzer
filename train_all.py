@@ -22,7 +22,6 @@ from torchvision import transforms
 from PIL import Image
 import timm
 
-# ── Configurare ──────────────────────────────────────────────────────────────
 ROOT       = Path(__file__).parent.resolve()
 EMB_DIR    = ROOT / "fashion_emb"
 INDEX_DIR  = ROOT / "fashion_index"
@@ -34,16 +33,14 @@ DEVICE     = torch.device("mps" if torch.backends.mps.is_available()
                           else "cpu")
 EMBED_DIM  = 512
 
-# EfficientNet hyperparams
 EFF_EPOCHS          = 40
 EFF_BATCH           = 32
 EFF_LR_BACKBONE     = 5e-5
 EFF_LR_HEAD         = 5e-4
 EFF_MARGIN          = 0.4
 EFF_HARD_NEG_EPOCH  = 10
-EFF_MIN_SAMPLES     = 3   # categorii cu cel puțin 3 imagini
+EFF_MIN_SAMPLES     = 3
 
-# CLIP hyperparams
 CLIP_EPOCHS = 10
 CLIP_BATCH  = 16
 CLIP_LR     = 3e-5
@@ -51,7 +48,6 @@ CLIP_LR     = 3e-5
 print(f"Device: {DEVICE}")
 print("=" * 60)
 
-# ── Augmentare ────────────────────────────────────────────────────────────────
 train_tf = transforms.Compose([
     transforms.Resize((256, 256)),
     transforms.RandomCrop(224),
@@ -62,7 +58,6 @@ train_tf = transforms.Compose([
     transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
 ])
 
-# ── Modele ────────────────────────────────────────────────────────────────────
 class FashionEmbeddingModel(nn.Module):
     def __init__(self, embed_dim=512):
         super().__init__()
@@ -94,13 +89,11 @@ class TripletLoss(nn.Module):
         return losses.mean(), active
 
 
-# ── Datasets ──────────────────────────────────────────────────────────────────
 class TripletDataset(Dataset):
     def __init__(self, metadata, transform, hard_negative=False, min_samples=3):
         self.tf = transform
         self.hard_negative = hard_negative
 
-        # Filtrare categorii cu suficiente exemple
         cat2items = defaultdict(list)
         for item in metadata:
             p = Path(item["crop_path"])
@@ -127,7 +120,6 @@ class TripletDataset(Dataset):
         pos_meta = random.choice(self.cat2items[cat])
 
         if self.hard_negative:
-            # Alege negativ din categoria cea mai apropiată lexical
             neg_cat = random.choice([c for c in self.all_cats if c != cat])
         else:
             neg_cat = random.choice([c for c in self.all_cats if c != cat])
@@ -158,7 +150,6 @@ class CLIPFashionDataset(Dataset):
         return img, text
 
 
-# ── EfficientNet Training ─────────────────────────────────────────────────────
 def train_efficientnet(metadata):
     print("\n" + "="*60)
     print("ETAPA 1: EfficientNet Triplet Training")
@@ -172,7 +163,6 @@ def train_efficientnet(metadata):
     model    = FashionEmbeddingModel(embed_dim=EMBED_DIM).to(DEVICE)
     criterion = TripletLoss(margin=EFF_MARGIN)
 
-    # Diferite LR pentru backbone vs head
     optimizer = torch.optim.AdamW([
         {"params": [p for n, p in model.backbone.named_parameters()
                     if "blocks" in n or "conv_head" in n or "bn2" in n],
@@ -229,7 +219,6 @@ def train_efficientnet(metadata):
     return model
 
 
-# ── Reconstruire index FAISS dupa antrenare ───────────────────────────────────
 def rebuild_efficientnet_index(model, metadata):
     print("\n[Index] Reconstruim indexul FAISS pentru EfficientNet...")
     import faiss
@@ -262,7 +251,6 @@ def rebuild_efficientnet_index(model, metadata):
     index.add(vectors_np)
     faiss.write_index(index, str(INDEX_DIR / "fashion.index"))
 
-    # Salvăm și vectorii npy
     np.save(str(EMB_DIR / "vectors.npy"), vectors_np)
 
     with open(EMB_DIR / "metadata.json", "w") as f:
@@ -271,7 +259,6 @@ def rebuild_efficientnet_index(model, metadata):
     print(f"  Index FAISS: {len(vectors_np)} vectori salvați.")
 
 
-# ── CLIP Fine-Tuning ──────────────────────────────────────────────────────────
 def train_clip(metadata):
     print("\n" + "="*60)
     print("ETAPA 2: CLIP Contrastive Fine-Tuning")
@@ -287,7 +274,6 @@ def train_clip(metadata):
     clip_model = CLIPModel.from_pretrained(model_id).to(DEVICE)
     clip_proc  = CLIPProcessor.from_pretrained(model_id)
 
-    # Îngheață backbone, antrenează doar proiecțiile
     for param in clip_model.parameters():
         param.requires_grad = False
     for param in clip_model.visual_projection.parameters():
@@ -351,7 +337,6 @@ def train_clip(metadata):
     return clip_model, clip_proc
 
 
-# ── Reconstruire index FAISS CLIP ─────────────────────────────────────────────
 def rebuild_clip_index(clip_model, clip_proc, metadata):
     print("\n[Index] Reconstruim indexul CLIP FAISS...")
     import faiss
@@ -383,23 +368,19 @@ def rebuild_clip_index(clip_model, clip_proc, metadata):
     print(f"  CLIP Index FAISS: {len(vectors_np)} vectori salvați (dim={clip_dim}).")
 
 
-# ── Main ──────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     print(f"\nÎncărcăm metadatele...")
     with open(EMB_DIR / "metadata.json") as f:
         metadata = json.load(f)
 
-    # Filtrăm imaginile care există
     metadata = [m for m in metadata if Path(m["crop_path"]).exists()]
     print(f"  {len(metadata)} imagini valide găsite.")
 
     t0 = time.time()
 
-    # ── ETAPA 1: EfficientNet ──
     eff_model = train_efficientnet(metadata)
     rebuild_efficientnet_index(eff_model, metadata)
 
-    # ── ETAPA 2: CLIP ──
     result = train_clip(metadata)
     if result:
         clip_model, clip_proc = result
